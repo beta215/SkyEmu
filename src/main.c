@@ -2242,40 +2242,45 @@ void se_load_rom(const char *filename){
   printf("Loading ROM: %s\n", filename); 
 
   if(sb_path_has_file_ext(filename,".zip")){
-    printf("Loading Zip:%s \n",filename);
+    printf("Reading zip\n");
     mz_zip_archive zip = {0};
     mz_zip_zero_struct(&zip);
     if(mz_zip_reader_init_file(&zip, filename, 0)){
       size_t total_files = mz_zip_reader_get_num_files(&zip);
       for(size_t i=0;i<total_files;++i){
         char file_name_buff[SB_FILE_PATH_SIZE];
+        uint8_t *file_data = NULL;
         bool success= true;
         mz_zip_reader_get_filename(&zip, i, file_name_buff, SB_FILE_PATH_SIZE);
         file_name_buff[SB_FILE_PATH_SIZE-1]=0;
         mz_zip_archive_file_stat stat={0};
         success&= mz_zip_reader_file_stat(&zip,i, &stat);
         success&= !stat.m_is_directory;
-        emu_state.rom_data = NULL;
-        emu_state.rom_size = 0; 
         snprintf(emu_state.rom_path,sizeof(emu_state.rom_path),"%s/%s",filename,file_name_buff);
         if(success){
-          emu_state.rom_size = stat.m_uncomp_size;
-          emu_state.rom_data = (uint8_t*)malloc(emu_state.rom_size);
-          success&= mz_zip_reader_extract_to_mem(&zip,i,emu_state.rom_data, emu_state.rom_size,0);
-          if(!success)free(emu_state.rom_data);
+          file_data = (uint8_t *)malloc(stat.m_uncomp_size);
+          success&= mz_zip_reader_extract_to_mem(&zip,i,file_data, stat.m_uncomp_size,0);
+          if(!success){
+              if(zip.m_last_error==MZ_ZIP_UNSUPPORTED_METHOD)
+                  printf("Unsupported compression method, supported: deflate\n");
+              free(file_data);
+          }else{
+              emu_state.rom_size = stat.m_uncomp_size;
+              emu_state.rom_data = file_data;
+          }
         }
         if(success)se_load_rom_from_emu_state(&emu_state);
         if(emu_state.rom_loaded)break;
       }
       mz_zip_reader_end(&zip);
-    }else printf("Failed to load zip: %s\n",filename);
+    }else printf("Failed to read zip\n");
 
   }else{
     emu_state.rom_data = sb_load_file_data(emu_state.rom_path, &emu_state.rom_size);
     se_load_rom_from_emu_state(&emu_state);
   }
   if(emu_state.rom_loaded==false){
-    printf("ERROR: Unknown ROM type: %s\n", filename);
+    printf("ERROR: failed to load ROM: %s\n", filename);
     emu_state.run_mode= SB_MODE_PAUSE;
   }else{
     emu_state.run_mode= SB_MODE_RUN;
